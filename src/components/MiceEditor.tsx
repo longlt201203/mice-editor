@@ -1,12 +1,46 @@
 import 'draft-js/dist/Draft.css';
 
-import { CompositeDecorator, ContentBlock, DraftHandleValue, Editor, EditorCommand, EditorState, Modifier, getDefaultKeyBinding } from 'draft-js';
+import { CompositeDecorator, ContentBlock, ContentState, DraftHandleValue, Editor, EditorCommand, EditorState, Modifier, RichUtils, SelectionState, genKey, getDefaultKeyBinding } from 'draft-js';
 import { useEffect, useState } from 'react';
 import { h1Styling } from './H1';
 import { paragraphStyling } from './Paragraph';
 import { h2Styling } from './H2';
 import { h3Styling } from './H3';
 import { codeBlockStyling } from './CodeBlock';
+
+function addBlockAfter(editorState: EditorState, keyBefore: string, blockParams: any | null) {
+    const newBlock = new ContentBlock({
+        key: genKey(),
+        type: 'unstyled',
+        text: '',
+        ...blockParams,
+    });
+
+    const contentState = editorState.getCurrentContent();
+    const oldBlockMap = contentState.getBlockMap();
+    const newBlockMap = Immutable.OrderedMap().withMutations(map => {
+        oldBlockMap.forEach((val, key) => {
+            map.set(key, val);
+
+            if (keyBefore === key) {
+                map.set(newBlock.getKey(), newBlock);
+            }
+        });
+    });
+
+    return EditorState.forceSelection(
+        EditorState.push(
+            editorState,
+            ContentState
+                .createFromBlockArray(newBlockMap.toArray() as Array<ContentBlock>)
+                .set('selectionBefore', contentState.getSelectionBefore())
+                .set('selectionAfter', contentState.getSelectionAfter()) as ContentState,
+            'change-block-data'
+        ),
+        SelectionState.createEmpty(newBlock.getKey())
+    );
+}
+
 
 function miceEditorBlockStylingFn(contentBlock: ContentBlock) {
     const type = contentBlock.getType();
@@ -60,24 +94,20 @@ export default function MiceEditor() {
 
     const handleKeyCommand = (command: string): DraftHandleValue => {
         if (editorState) {
-            let contentState = editorState.getCurrentContent();
-            
             switch (command) {
                 case "preprocessNewLine": {
-                    let selectionState = editorState.getSelection();
-                    const anchorKey = selectionState.getAnchorKey();
-                    const block = contentState.getBlockForKey(anchorKey);
+                    if (RichUtils.getCurrentBlockType(editorState) == "codeblock") {
+                        const newEditorState = RichUtils.insertSoftNewline(editorState);
+                        setEditorState(newEditorState);
 
-                    if (block.getType() == "codeblock") {
-                        // const text = block.getText();
-                        // const newSelectionState = selectionState.set("focusOffset", text.length+1);
-                        contentState = Modifier.insertText(contentState, selectionState, "\n");
                     } else {
+                        const selectionState = editorState.getSelection();
+                        const anchorKey = selectionState.getAnchorKey();
+                        const contentState = editorState.getCurrentContent();
+                        const block = contentState.getBlockForKey(anchorKey);
 
+                        setEditorState(addBlockAfter(editorState, block.getKey(), null));
                     }
-
-                    const newEditorState = EditorState.set(editorState, { currentContent: contentState, selection: selectionState.set("anchorOffset", block.getText().length+1) });
-                    setEditorState(newEditorState);
 
                     return "handled";
                 }
